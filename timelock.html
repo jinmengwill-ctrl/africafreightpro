@@ -346,22 +346,40 @@ function updateCountdown(item) {
 async function revealItem(item) {
   clearInterval(countdownTimer);
   
+  // Already revealed?
+  if (item.plaintext) {
+    document.getElementById('revealedLabel').textContent = `📋 ${item.label}`;
+    document.getElementById('revealedContent').textContent = item.plaintext;
+    switchSection('revealed');
+    return;
+  }
+  
   try {
     const decrypted = await decrypt(item.encrypted, item.unlockTime);
     
+    // Save plaintext back to vault so it persists
+    const vault = getVault();
+    const idx = vault.findIndex(v => v.id === item.id);
+    if (idx !== -1) {
+      vault[idx].plaintext = decrypted;
+      vault[idx].revealed = true;
+      saveVault(vault);
+    }
+    
     document.getElementById('revealedLabel').textContent = `📋 ${item.label}`;
     document.getElementById('revealedContent').textContent = decrypted;
-    
     switchSection('revealed');
-    
-    // Remove from vault
-    const vault = getVault().filter(v => v.id !== item.id);
-    saveVault(vault);
   } catch (e) {
-    // Decrypt failed (tampered?) - remove it
-    const vault = getVault().filter(v => v.id !== item.id);
-    saveVault(vault);
-    showError('解锁失败，数据可能已损坏');
+    // Decrypt failed - mark as broken
+    const vault = getVault();
+    const idx = vault.findIndex(v => v.id === item.id);
+    if (idx !== -1) {
+      vault[idx].plaintext = '(解密失败，数据可能已损坏)';
+      vault[idx].revealed = true;
+      saveVault(vault);
+    }
+    switchSection('lock');
+    showError('解密失败，数据可能已损坏，请手动删除');
   }
 }
 
@@ -379,30 +397,30 @@ function resetView() {
 
 function checkAll() {
   const vault = getVault();
+  const now = Date.now();
   
-  // Find first locked item still pending
-  const pending = vault.filter(v => v.unlockTime > Date.now());
-  const ready = vault.filter(v => v.unlockTime <= Date.now());
+  // Find first LOCKED item (not yet revealed)
+  const locked = vault.filter(v => !v.revealed && v.unlockTime > now);
+  // Find items that just expired (locked & time's up, but not yet decrypted)
+  const expired = vault.filter(v => !v.revealed && !v.plaintext && v.unlockTime <= now);
   
-  if (ready.length > 0) {
-    // Auto-reveal the first ready one
-    revealItem(ready[0]);
+  if (expired.length > 0) {
+    // Auto-decrypt the first expired one
+    revealItem(expired[0]);
     return;
   }
   
-  if (pending.length > 0) {
-    const item = pending[0];
+  if (locked.length > 0) {
+    const item = locked[0];
     document.getElementById('lockedLabel').textContent = `🔒 ${item.label}`;
     switchSection('locked');
     
     clearInterval(countdownTimer);
     updateCountdown(item);
     countdownTimer = setInterval(() => updateCountdown(item), 1000);
-  } else {
-    switchSection('lock');
-    clearInterval(countdownTimer);
   }
   
+  // Don't auto-hide the lock form if there are unlocked items to view
   renderHistory();
 }
 
@@ -416,30 +434,54 @@ function renderHistory() {
   }
   
   const now = Date.now();
-  let html = '<h3>📦 已锁定的内容</h3>';
+  const lockedItems = vault.filter(v => !v.revealed);
+  const unlockedItems = vault.filter(v => v.revealed);
   
-  vault.forEach(item => {
-    const locked = item.unlockTime > now;
-    const remaining = item.unlockTime - now;
-    let timeStr;
-    if (locked) {
-      const h = Math.floor(remaining / 3600000);
-      const m = Math.floor((remaining % 3600000) / 60000);
-      timeStr = h > 0 ? `${h}小时${m}分钟` : `${m}分钟`;
-    } else {
-      timeStr = '已到期';
-    }
-    
-    html += `<div class="history-item">
-      <span class="name">🔒 ${item.label}</span>
-      <span>
-        <span class="status ${locked ? 'status-locked' : 'status-open'}">${locked ? '⏳ ' + timeStr : '✅ 已到期'}</span>
-        <span class="del" onclick="deleteItem(${item.id})" title="删除">✕</span>
-      </span>
-    </div>`;
-  });
+  let html = '';
+  if (lockedItems.length > 0) {
+    html += '<h3>🔒 锁定中</h3>';
+    lockedItems.forEach(item => {
+      const remaining = item.unlockTime - now;
+      let timeStr;
+      if (remaining > 0) {
+        const d = Math.floor(remaining / 86400000);
+        const h = Math.floor((remaining % 86400000) / 3600000);
+        const m = Math.floor((remaining % 3600000) / 60000);
+        timeStr = d > 0 ? `${d}天${h}小时` : h > 0 ? `${h}小时${m}分钟` : `${m}分钟`;
+      } else {
+        timeStr = '解密中…';
+      }
+      html += `<div class="history-item">
+        <span class="name">🔒 ${item.label}</span>
+        <span>
+          <span class="status status-locked">⏳ ${timeStr}</span>
+          <span class="del" onclick="deleteItem(${item.id})" title="删除">✕</span>
+        </span>
+      </div>`;
+    });
+  }
+  
+  if (unlockedItems.length > 0) {
+    html += '<h3>✅ 已解锁</h3>';
+    unlockedItems.forEach(item => {
+      const preview = (item.plaintext || '').substring(0, 30);
+      html += `<div class="history-item">
+        <span class="name">📋 ${item.label} <span style="color:#888;font-size:12px;">${preview}…</span></span>
+        <span>
+          <span class="status status-open" style="cursor:pointer;text-decoration:underline;" onclick="revealItemById(${item.id})">查看</span>
+          <span class="del" onclick="deleteItem(${item.id})" title="删除">✕</span>
+        </span>
+      </div>`;
+    });
+  }
   
   section.innerHTML = html;
+}
+
+function revealItemById(id) {
+  const vault = getVault();
+  const item = vault.find(v => v.id === id);
+  if (item) revealItem(item);
 }
 
 function deleteItem(id) {
