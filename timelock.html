@@ -143,7 +143,8 @@ textarea { resize: vertical; min-height: 80px; font-family: monospace; }
     
     <label class="label">锁定时间</label>
     <div class="row">
-      <input type="number" id="hoursInput" placeholder="小时" min="0" max="720" value="0">
+      <input type="number" id="daysInput" placeholder="天" min="0" max="365" value="0">
+      <input type="number" id="hoursInput" placeholder="小时" min="0" max="23" value="0">
       <input type="number" id="minsInput" placeholder="分钟" min="0" max="59" value="30">
     </div>
     
@@ -251,11 +252,12 @@ async function decrypt(packedBase64, unlockTime) {
 async function lockSecret() {
   const label = document.getElementById('labelInput').value.trim() || '未命名';
   const secret = document.getElementById('secretInput').value.trim();
+  const days = parseInt(document.getElementById('daysInput').value) || 0;
   const hours = parseInt(document.getElementById('hoursInput').value) || 0;
   const mins = parseInt(document.getElementById('minsInput').value) || 0;
   
   if (!secret) return showError('请输入要锁定的内容');
-  const totalMs = (hours * 60 + mins) * 60 * 1000;
+  const totalMs = ((days * 24 + hours) * 60 + mins) * 60 * 1000;
   if (totalMs < 60000) return showError('至少锁定 1 分钟');
   if (totalMs > 30 * 24 * 3600 * 1000) return showError('最长 30 天');
   
@@ -280,6 +282,7 @@ async function lockSecret() {
     // Reset form
     document.getElementById('labelInput').value = '';
     document.getElementById('secretInput').value = '';
+    document.getElementById('daysInput').value = 0;
     document.getElementById('hoursInput').value = 0;
     document.getElementById('minsInput').value = 30;
     document.getElementById('lockBtn').disabled = false;
