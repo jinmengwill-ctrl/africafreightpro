@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>时间锁</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #0f0f0f;
+  color: #e0e0e0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.container {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 16px;
+  padding: 32px 24px;
+  width: 100%;
+  max-width: 400px;
+}
+h1 {
+  text-align: center;
+  font-size: 22px;
+  margin-bottom: 6px;
+  color: #fff;
+}
+.subtitle { text-align: center; font-size: 13px; color: #888; margin-bottom: 24px; }
+
+.label { font-size: 13px; color: #aaa; margin-bottom: 6px; display: block; }
+input, textarea {
+  width: 100%;
+  padding: 12px 14px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 15px;
+  margin-bottom: 16px;
+  outline: none;
+  transition: border .2s;
+}
+input:focus, textarea:focus { border-color: #f0a500; }
+textarea { resize: vertical; min-height: 80px; font-family: monospace; }
+
+.row { display: flex; gap: 10px; margin-bottom: 16px; }
+.row input { flex: 1; margin-bottom: 0; }
+.row select { 
+  padding: 12px; background: #252525; border: 1px solid #444;
+  border-radius: 10px; color: #fff; font-size: 15px; min-width: 70px; 
+}
+
+.btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn-lock { background: #f0a500; color: #0f0f0f; }
+.btn-lock:hover { background: #ffbb33; }
+.btn-lock:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+.section { display: none; }
+.section.active { display: block; }
+
+/* Locked view */
+.lock-icon { text-align: center; font-size: 48px; margin: 16px 0; }
+.countdown {
+  text-align: center;
+  font-size: 36px;
+  font-weight: 700;
+  color: #f0a500;
+  margin: 12px 0;
+  font-variant-numeric: tabular-nums;
+  font-family: 'SF Mono', 'Cascadia Code', monospace;
+}
+.countdown-label { text-align: center; font-size: 13px; color: #888; margin-bottom: 20px; }
+
+/* Revealed */
+.reveal-box {
+  background: #0d2818;
+  border: 1px solid #1a5c32;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 15px;
+  color: #4ade80;
+  min-height: 60px;
+}
+.reveal-label { font-size: 12px; color: #4ade80; margin-bottom: 6px; }
+
+.history {
+  margin-top: 24px;
+  border-top: 1px solid #333;
+  padding-top: 16px;
+}
+.history h3 { font-size: 14px; margin-bottom: 10px; color: #888; }
+.history-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background: #252525;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+.history-item .name { color: #ccc; }
+.history-item .status { font-size: 12px; }
+.status-locked { color: #f0a500; }
+.status-open { color: #4ade80; }
+.history-item .del { color: #666; cursor: pointer; margin-left: 10px; }
+.history-item .del:hover { color: #e74c3c; }
+
+.error { color: #e74c3c; font-size: 13px; margin-bottom: 12px; display: none; }
+.error.show { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🔒 时间锁</h1>
+  <p class="subtitle">锁住密码，到时间自动解开</p>
+
+  <!-- Lock form -->
+  <div id="lockSection" class="section active">
+    <div class="error" id="lockError"></div>
+    <label class="label">备注（方便自己记住这是什么）</label>
+    <input type="text" id="labelInput" placeholder="例如：交易所密码、钱包助记词…" maxlength="40">
+    
+    <label class="label">要锁住的内容</label>
+    <textarea id="secretInput" placeholder="输入要锁定密码或内容…"></textarea>
+    
+    <label class="label">锁定时间</label>
+    <div class="row">
+      <input type="number" id="hoursInput" placeholder="小时" min="0" max="720" value="0">
+      <input type="number" id="minsInput" placeholder="分钟" min="0" max="59" value="30">
+    </div>
+    
+    <button class="btn btn-lock" id="lockBtn" onclick="lockSecret()">🔐 锁定</button>
+  </div>
+
+  <!-- Locked view -->
+  <div id="lockedSection" class="section">
+    <div class="lock-icon">🔐</div>
+    <div id="lockedLabel" style="text-align:center;font-size:15px;margin-bottom:8px;color:#ccc;"></div>
+    <div class="countdown" id="countdown">--:--:--</div>
+    <div class="countdown-label" id="unlockTime"></div>
+  </div>
+
+  <!-- Revealed view -->
+  <div id="revealedSection" class="section">
+    <div id="revealedLabel" style="text-align:center;font-size:15px;margin-bottom:12px;color:#ccc;"></div>
+    <div class="reveal-box">
+      <div class="reveal-label">✅ 已解锁 — 内容如下</div>
+      <div id="revealedContent"></div>
+    </div>
+    <button class="btn btn-lock" onclick="resetView()">🔒 锁新的</button>
+  </div>
+
+  <!-- History -->
+  <div class="history" id="historySection"></div>
+</div>
+
+<script>
+const STORAGE_KEY = 'timelock_vault';
+
+function getVault() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch { return []; }
+}
+
+function saveVault(vault) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(vault));
+}
+
+function showError(msg) {
+  const el = document.getElementById('lockError');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+async function encrypt(plaintext, unlockTime) {
+  // Generate key from unlock time + random salt
+  const encoder = new TextEncoder();
+  const keyMaterial = encoder.encode(String(unlockTime));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  
+  const key = await crypto.subtle.importKey(
+    'raw', keyMaterial, { name: 'PBKDF2' }, false, ['deriveKey']
+  );
+  
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    key, { name: 'AES-GCM', length: 256 }, false, ['encrypt']
+  );
+  
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = encoder.encode(plaintext);
+  
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, aesKey, data
+  );
+  
+  // Pack: salt(16) + iv(12) + ciphertext
+  const packed = new Uint8Array(16 + 12 + encrypted.byteLength);
+  packed.set(salt, 0);
+  packed.set(iv, 16);
+  packed.set(new Uint8Array(encrypted), 28);
+  
+  return btoa(String.fromCharCode(...packed));
+}
+
+async function decrypt(packedBase64, unlockTime) {
+  const packed = Uint8Array.from(atob(packedBase64), c => c.charCodeAt(0));
+  const salt = packed.slice(0, 16);
+  const iv = packed.slice(16, 28);
+  const ciphertext = packed.slice(28);
+  
+  const encoder = new TextEncoder();
+  const keyMaterial = encoder.encode(String(unlockTime));
+  
+  const key = await crypto.subtle.importKey(
+    'raw', keyMaterial, { name: 'PBKDF2' }, false, ['deriveKey']
+  );
+  
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    key, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+  );
+  
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv }, aesKey, ciphertext
+  );
+  
+  return new TextDecoder().decode(decrypted);
+}
+
+async function lockSecret() {
+  const label = document.getElementById('labelInput').value.trim() || '未命名';
+  const secret = document.getElementById('secretInput').value.trim();
+  const hours = parseInt(document.getElementById('hoursInput').value) || 0;
+  const mins = parseInt(document.getElementById('minsInput').value) || 0;
+  
+  if (!secret) return showError('请输入要锁定的内容');
+  const totalMs = (hours * 60 + mins) * 60 * 1000;
+  if (totalMs < 60000) return showError('至少锁定 1 分钟');
+  if (totalMs > 30 * 24 * 3600 * 1000) return showError('最长 30 天');
+  
+  const unlockTime = Date.now() + totalMs;
+  
+  document.getElementById('lockBtn').disabled = true;
+  document.getElementById('lockBtn').textContent = '加密中…';
+  
+  try {
+    const encrypted = await encrypt(secret, unlockTime);
+    
+    const vault = getVault();
+    vault.push({
+      id: Date.now(),
+      label,
+      encrypted,
+      unlockTime,
+      createdAt: Date.now()
+    });
+    saveVault(vault);
+    
+    // Reset form
+    document.getElementById('labelInput').value = '';
+    document.getElementById('secretInput').value = '';
+    document.getElementById('hoursInput').value = 0;
+    document.getElementById('minsInput').value = 30;
+    document.getElementById('lockBtn').disabled = false;
+    document.getElementById('lockBtn').textContent = '🔐 锁定';
+    
+    checkAll();
+  } catch (e) {
+    document.getElementById('lockBtn').disabled = false;
+    document.getElementById('lockBtn').textContent = '🔐 锁定';
+    showError('加密失败，请重试');
+  }
+}
+
+let countdownTimer = null;
+
+function pad(n) { return String(n).padStart(2, '0'); }
+
+function updateCountdown(item) {
+  const now = Date.now();
+  const remaining = item.unlockTime - now;
+  
+  if (remaining <= 0) {
+    revealItem(item);
+    return;
+  }
+  
+  const h = Math.floor(remaining / 3600000);
+  const m = Math.floor((remaining % 3600000) / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  
+  const countdown = document.getElementById('countdown');
+  const unlockTimeEl = document.getElementById('unlockTime');
+  
+  if (countdown) {
+    countdown.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+  if (unlockTimeEl) {
+    unlockTimeEl.textContent = `解锁时间：${new Date(item.unlockTime).toLocaleString('zh-CN')}`;
+  }
+}
+
+async function revealItem(item) {
+  clearInterval(countdownTimer);
+  
+  try {
+    const decrypted = await decrypt(item.encrypted, item.unlockTime);
+    
+    document.getElementById('revealedLabel').textContent = `📋 ${item.label}`;
+    document.getElementById('revealedContent').textContent = decrypted;
+    
+    switchSection('revealed');
+    
+    // Remove from vault
+    const vault = getVault().filter(v => v.id !== item.id);
+    saveVault(vault);
+  } catch (e) {
+    // Decrypt failed (tampered?) - remove it
+    const vault = getVault().filter(v => v.id !== item.id);
+    saveVault(vault);
+    showError('解锁失败，数据可能已损坏');
+  }
+}
+
+function switchSection(name) {
+  ['lockSection', 'lockedSection', 'revealedSection'].forEach(id => {
+    document.getElementById(id).classList.remove('active');
+  });
+  document.getElementById(name + 'Section').classList.add('active');
+}
+
+function resetView() {
+  switchSection('lock');
+  checkAll();
+}
+
+function checkAll() {
+  const vault = getVault();
+  
+  // Find first locked item still pending
+  const pending = vault.filter(v => v.unlockTime > Date.now());
+  const ready = vault.filter(v => v.unlockTime <= Date.now());
+  
+  if (ready.length > 0) {
+    // Auto-reveal the first ready one
+    revealItem(ready[0]);
+    return;
+  }
+  
+  if (pending.length > 0) {
+    const item = pending[0];
+    document.getElementById('lockedLabel').textContent = `🔒 ${item.label}`;
+    switchSection('locked');
+    
+    clearInterval(countdownTimer);
+    updateCountdown(item);
+    countdownTimer = setInterval(() => updateCountdown(item), 1000);
+  } else {
+    switchSection('lock');
+    clearInterval(countdownTimer);
+  }
+  
+  renderHistory();
+}
+
+function renderHistory() {
+  const vault = getVault();
+  const section = document.getElementById('historySection');
+  
+  if (vault.length === 0) {
+    section.innerHTML = '';
+    return;
+  }
+  
+  const now = Date.now();
+  let html = '<h3>📦 已锁定的内容</h3>';
+  
+  vault.forEach(item => {
+    const locked = item.unlockTime > now;
+    const remaining = item.unlockTime - now;
+    let timeStr;
+    if (locked) {
+      const h = Math.floor(remaining / 3600000);
+      const m = Math.floor((remaining % 3600000) / 60000);
+      timeStr = h > 0 ? `${h}小时${m}分钟` : `${m}分钟`;
+    } else {
+      timeStr = '已到期';
+    }
+    
+    html += `<div class="history-item">
+      <span class="name">🔒 ${item.label}</span>
+      <span>
+        <span class="status ${locked ? 'status-locked' : 'status-open'}">${locked ? '⏳ ' + timeStr : '✅ 已到期'}</span>
+        <span class="del" onclick="deleteItem(${item.id})" title="删除">✕</span>
+      </span>
+    </div>`;
+  });
+  
+  section.innerHTML = html;
+}
+
+function deleteItem(id) {
+  if (!confirm('确定删除这条锁定内容？删除后无法恢复。')) return;
+  const vault = getVault().filter(v => v.id !== id);
+  saveVault(vault);
+  checkAll();
+}
+
+// Init
+checkAll();
+setInterval(checkAll, 5000); // Poll every 5s for auto-reveal
+</script>
+</body>
+</html>
