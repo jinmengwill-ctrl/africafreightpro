@@ -123,6 +123,19 @@ textarea { resize: vertical; min-height: 80px; font-family: monospace; }
 .history-item .del { color: #666; cursor: pointer; margin-left: 10px; }
 .history-item .del:hover { color: #e74c3c; }
 
+.btn-backup {
+  flex: 1;
+  padding: 10px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 8px;
+  color: #aaa;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn-backup:hover { background: #333; color: #fff; }
+
 .error { color: #e74c3c; font-size: 13px; margin-bottom: 12px; display: none; }
 .error.show { display: block; }
 </style>
@@ -171,6 +184,12 @@ textarea { resize: vertical; min-height: 80px; font-family: monospace; }
 
   <!-- History -->
   <div class="history" id="historySection"></div>
+  
+  <div style="margin-top:16px;display:flex;gap:8px;">
+    <button class="btn-backup" onclick="exportVault()">💾 备份</button>
+    <button class="btn-backup" onclick="document.getElementById('importFile').click()">📥 恢复</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importVault(event)">
+  </div>
 </div>
 
 <script>
@@ -428,6 +447,46 @@ function deleteItem(id) {
   const vault = getVault().filter(v => v.id !== id);
   saveVault(vault);
   checkAll();
+}
+
+function exportVault() {
+  const vault = getVault();
+  if (vault.length === 0) return showError('没有需要备份的内容');
+  const blob = new Blob([JSON.stringify(vault, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `timelock_backup_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importVault(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!Array.isArray(data)) throw new Error('格式错误');
+      const existing = getVault();
+      const existingIds = new Set(existing.map(v => v.id));
+      let added = 0;
+      data.forEach(item => {
+        if (!existingIds.has(item.id)) {
+          existing.push(item);
+          added++;
+        }
+      });
+      saveVault(existing);
+      checkAll();
+      alert(added > 0 ? `已恢复 ${added} 条，共 ${existing.length} 条` : '没有新数据（可能已存在）');
+    } catch (err) {
+      alert('备份文件格式错误，无法恢复');
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
 }
 
 // Init
